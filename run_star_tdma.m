@@ -122,9 +122,16 @@ function results = run_star_tdma(varargin)
     addParameter(p,'preamble_req_snr_db',0);
     addParameter(p,'log_level',1);
     addParameter(p,'rng_seed',1337);
+    addParameter(p,'auth_mode','controlledPUF');   % 'controlledPUF' | 'exposedCRP'
+    addParameter(p,'log_soft_metrics',false);      % true => log correlator magnitudes for attacker features
+
 
     parse(p,varargin{:});
     cfg = p.Results;
+
+    % ---- Modeling-attack logs (populated only if enabled) ----
+    CRP_LOGS  = {};   % each: struct('node',i,'C',logical row),'r',logical,'snr_dB',val)
+    SOFT_LOGS = {};   % each: struct('node',i,'C',logical row),'soft',1xNbits,'snr_dB',val)
 
     % --- Basic checks
     if strcmpi(cfg.scheme,'CSK')
