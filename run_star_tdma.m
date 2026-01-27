@@ -124,6 +124,8 @@ function results = run_star_tdma(varargin)
     addParameter(p,'rng_seed',1337);
     addParameter(p,'auth_mode','controlledPUF');   % 'controlledPUF' | 'exposedCRP'
     addParameter(p,'log_soft_metrics',false);      % true => log correlator magnitudes for attacker features
+    addParameter(p,'use_per_user_perm', false);   % NEW: per-user permutation of chips
+
 
 
     parse(p,varargin{:});
@@ -305,10 +307,20 @@ function results = run_star_tdma(varargin)
                                 tries = tries + 1;
                             end
                             used_rows(row) = true;
-                            spread = slot_dither .* H(row, :);
+                            base_row = H(row, :);
+
+                            % Slot-wide sign dither (as before); preserves orthogonality if used alone
+                            spread = slot_dither .* base_row;
+                            %spread = slot_dither .* H(row, :);
                         else
                             R = get_puf_bits(node, C_eff, cfg.L);
                             spread = 2*R - 1;
+                        end
+
+                        % --- NEW: Optional per-user permutation (breaks strict orthogonality)
+                        if cfg.use_per_user_perm
+                            perm_u = make_user_perm(node, C_eff, cfg.L, iusr);  % NEW helper below
+                            spread = spread(perm_u);
                         end
 
                         % Mix into composite
@@ -971,4 +983,38 @@ function [acc, trials] = impostor_csk_vote(nodes, legit_idx, C_bits, obs, thr, a
         trials = trials + 1;
         if pass_count >= need, acc = acc + 1; end
     end
+end
+
+function perm = make_user_perm(node, C_eff, L, user_id)
+% MAKE_USER_PERM  Deterministic per-user permutation of 1..L from PUF-derived seed.
+%   Uses PUF bits (secret) so the permutation is not predictable to an observer.
+%
+% Inputs:
+%   node     : the node struct (for get_puf_bits)
+%   C_eff    : effective challenge (challenge ⊕ nonce mix)
+%   L        : chip length
+%   user_id  : integer user index (adds diversity across co-scheduled users)
+%
+% Output:
+%   perm     : 1xL permutation vector
+
+    % Get a robust seed from PUF bits; >=128 bits is plenty for the PRNG
+    seed_bits = get_puf_bits(node, C_eff, max(L, 128));   % logical row
+    s = hash_bits_u32(seed_bits);                         % uint32 seed
+    s = bitxor(s, uint32(1664525*user_id + 1013904223));  % mix in user id
+
+    perm = 1:L;
+    for k = L:-1:2
+        s = xorshift32(s);
+        j = 1 + mod(double(s), k);  % 1..k
+        % swap perm(k) and perm(j)
+        tmp = perm(k); perm(k) = perm(j); perm(j) = tmp;
+    end
+end
+
+function s = xorshift32(s)
+% XorShift32 step, returns new uint32 state
+    s = bitxor(s, bitshift(s, 13, 'uint32'));
+    s = bitxor(s, bitshift(s, -17,'uint32'));
+    s = bitxor(s, bitshift(s, 5, 'uint32'));
 end
